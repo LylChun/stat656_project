@@ -1,0 +1,82 @@
+---
+title: "Project Exploration"
+author: "Elizabeth Chun"
+date: "`r Sys.Date()`"
+output: pdf_document
+---
+
+```{r setup}
+library(tidyquant)
+library(dplyr)
+library(ggplot2)
+```
+
+
+```{r data}
+stock_names = read.csv('project/stock_list.txt')
+
+start_date = as.Date("2020-01-01", format = "%Y-%m-%d")
+stock_list = lapply(as.list(stock_names$Sumbol), tq_get, from = start_date)
+
+stock_df = bind_rows(stock_list)
+```
+
+```{r}
+tmp = read.csv("project/constituents_csv.csv")
+```
+
+
+```{r plot}
+## Uncomment to generate plot pdf
+# pdf('project/stock_plots.pdf', onefile = TRUE, width = 10, height = 7)
+# for (i in 1:length(stock_list)) {
+#   p = ggplot(stock_list[[i]]) +
+#     geom_point(aes(date, close)) +
+#     ggtitle(paste0(stock_names$Symbol[i], ": ", stock_names$Name[i]))
+#   print(p)
+# }
+# dev.off()
+```
+
+```{r}
+library(forecast)
+
+
+ty = stock_list[[1]]
+ty_train = ty[1:60, ]
+
+model_arima = auto.arima(ty_train$close)
+tmp = forecast(model_arima)
+
+plot_data = ty[1:70, ] %>%
+  mutate(predicted = c(rep(NA, 60), tmp$mean))
+
+ggplot(plot_data) +
+  geom_line(aes(date, close)) +
+  geom_line(aes(date, predicted), color = "red")
+```
+
+```{r}
+pdf("project/arima_10ahead.pdf", onefile = TRUE, width = 10, height = 7)
+for (i in 1:nrow(stock_names)) {
+
+  ty = stock_list[[i]]
+  ty_train = ty[1:60, ]
+
+  model_arima = auto.arima(ty_train$close)
+  tmp = forecast(model_arima)
+  
+  plot_data = ty[1:70, ] %>%
+    mutate(predicted = c(rep(NA, 60), tmp$mean))
+  
+  p = ggplot(plot_data) +
+    geom_line(aes(date, close)) +
+    geom_line(aes(date, predicted), color = "red") +
+    ggtitle(paste0(stock_names$Symbol[i], ": ", stock_names$Name[i]))
+  print(p)
+}
+dev.off()
+```
+
+
+
