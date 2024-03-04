@@ -8,21 +8,18 @@ output: pdf_document
 ```{r setup}
 library(tidyquant)
 library(dplyr)
-library(ggplot2)
+library(ggplot2) 
 ```
 
 
 ```{r data}
-stock_names = read.csv('project/stock_list.txt')
+stock_names = read.csv('project/constituents_sp500_feb4_2024.csv')
 
-start_date = as.Date("2020-01-01", format = "%Y-%m-%d")
-stock_list = lapply(as.list(stock_names$Sumbol), tq_get, from = start_date)
+start_date = as.Date("2023-01-01", format = "%Y-%m-%d")
+end_date = as.Date("2023-12-31", format = "%Y-%m-%d")
+stock_list = lapply(as.list(stock_names$Ticker), tq_get, from = start_date, to = end_date)
 
 stock_df = bind_rows(stock_list)
-```
-
-```{r}
-tmp = read.csv("project/constituents_csv.csv")
 ```
 
 
@@ -40,7 +37,6 @@ tmp = read.csv("project/constituents_csv.csv")
 
 ```{r}
 library(forecast)
-
 
 ty = stock_list[[1]]
 ty_train = ty[1:60, ]
