@@ -23,6 +23,11 @@ stock_df = bind_rows(stock_list)
 ```
 
 
+```{r}
+write.csv(stock_df, file = "project/stock_data.csv", row.names = FALSE)
+```
+
+
 ```{r plot}
 ## Uncomment to generate plot pdf
 # pdf('project/stock_plots.pdf', onefile = TRUE, width = 10, height = 7)
