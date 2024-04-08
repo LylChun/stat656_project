@@ -90,7 +90,7 @@ history <- model %>% fit(
 preds = predict(model, testgenerator, steps = 50)
 
 ## 5. create example plots showing first 10 stock predictions
-pdf("project/plots/lstm_v1.pdf", onefile = TRUE, height = 7, width = 10)
+pdf("project/output/lstm_v1.pdf", onefile = TRUE, height = 7, width = 10)
 for (i in 1:10) {
   single_stock = stock_test %>%
     filter(ticker == i) %>%
