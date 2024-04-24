@@ -4,6 +4,7 @@
 
 ### load packages
 library(dplyr)
+library(tidyr)
 library(keras)
 library(ggplot2)
 
@@ -11,6 +12,7 @@ library(ggplot2)
 # NOTE: to change configs like length_input, modify config file and re-source process_data.R
 rm(list = ls())
 source("project/process_data.R")
+cat("length_input =", length_input)
 
 ### build model framework
 ## 1. define data generator
@@ -28,9 +30,13 @@ generator <- function(data, length_input = 7, length_output = 1, shuffle = FALSE
   # lag in front because first length_input points do not have enough data behind to forecast
   leading_zs = as.vector(seqvec(breakpoints[1:(length(breakpoints) - 1)],
                                 breakpoints[1:(length(breakpoints) - 1)] + length_input - 1))
-  # lag at end because last length_output points do not have enough forward points to allow forecast
-  trailing_zs = as.vector(seqvec(breakpoints[2:length(breakpoints)] - length_output + 1,
-                                 breakpoints[2:length(breakpoints)] - 1))
+  if (length_output == 1) {
+    trailing_zs = NULL # all points acceptable since the idx represents the first output point
+  } else {
+    # lag at end because last length_output points do not have enough forward points to allow forecast
+    trailing_zs = as.vector(seqvec(breakpoints[2:length(breakpoints)] - length_output + 1,
+                                   breakpoints[2:length(breakpoints)] - 1))
+  }
   idx_bool[c(leading_zs, trailing_zs)] = FALSE
   idx_loc = which(idx_bool)
 
@@ -90,26 +96,139 @@ model %>% compile(
 ## 4. fit model and evaluate
 history <- model %>% fit(
   traingenerator,
-  steps_per_epoch = 850,
-  epochs = 5,
+  steps_per_epoch = 500,
+  epochs = 3,
   validation_data = valgenerator,
   validation_steps = 50
 )
 
-preds = predict(model, testgenerator, steps = 50)
+# evalgenerator = generator(stock_test, length_input = length_input, length_output = length_output,
+#                           batch_size = 10, shuffle = FALSE)
+# evaluate(model, evalgenerator, steps = 50)
 
-## 5. create example plots showing first 10 stock predictions
-pdf(paste0("project/output/lstm_i", length_input, "_o", length_output, ".pdf"), onefile = TRUE, height = 7, width = 10)
-for (i in 1:25) {
+## get predictions and back transform (assumes length_testing = length_output)
+preds = predict(model, testgenerator, steps = 50)
+back_transform = stock_test %>%
+  group_by(symbol) %>%
+  summarise(
+    symbol = unique(symbol), minclose = unique(minclose), maxclose = unique(maxclose),
+    ticker = unique(ticker), .groups = "drop"
+  ) %>%
+  arrange(ticker) %>%
+  slice(1:500)
+xform_preds = cbind(back_transform, preds) %>%
+  mutate(
+    across(all_of(c("1", "2", "3", "4", "5")), # EEE
+           list(scaled = ~ .*(maxclose - minclose) + minclose))
+  ) %>%
+  select(symbol, ticker, one = `1_scaled`, two = `2_scaled`, three = `3_scaled`,
+         four = `4_scaled`, five = `5_scaled`) # EEE
+
+# xform_preds_long = xform_preds %>%
+#   pivot_longer(cols = c("one", "two", "three"),
+#                names_to = "index", values_to = "close_pred")
+#
+# pred_loss = stock_test %>%
+#   group_by(symbol) %>%
+#   mutate(
+#     symbol = symbol,
+#     close = c(rep(NA, length_input), close[(n() - length_output + 1):n()])
+#   ) %>%
+#   filter(ticker <= 500 & !is.na(close)) %>%
+#   mutate(
+#     index = c("one", "two", "three")
+#   ) %>%
+#   select(symbol, ticker, close, index) %>%
+#   left_join(xform_preds_long, by = c("symbol", "ticker", "index")) %>%
+#   mutate(
+#     abs_diff = abs(close_pred - close)
+#   ) %>%
+#   group_by(symbol) %>%
+#   summarise(
+#     MAE = mean(abs_diff)
+#   )
+
+# tuning = data.frame(
+#   length_input = length_input,
+#   MAE = mean(pred_loss$MAE)
+# )
+
+# write.table(tuning, "project/retransformed_test_error.csv",
+#             col.names = !file.exists("project/retransformed_test_error.csv"),
+#             row.names = FALSE, append = TRUE, sep= ",")
+
+
+## 5. write out predictions for 20 stocks
+shiny_stock = c("AAPL", "MSFT", "AMZN", "GOOGL", "META",
+                "BRK-B", "TSLA", "JPM", "XOM", "COST",
+                "PFE", "LOW", "DIS", "VZ", "PYPL",
+                "MAR", "F", "NEE", "LUV", "CMG")
+
+for (i in 1:20) {
+  preds = unlist(xform_preds[xform_preds$symbol == shiny_stock[i], 3:7]) # EEE
+
   single_stock = stock_test %>%
-    filter(ticker == i) %>%
+    filter(symbol == shiny_stock[i]) %>%
     mutate(
-      index = 1:n(),
-      prediction = c(rep(NA, length_input), preds[i, ])
-    )
-  stock_plot = ggplot(single_stock) +
-    geom_line(aes(index, close_scaled), color = "black") +
-    geom_line(aes(index, prediction), color = "red", na.rm = TRUE)
-  print(stock_plot)
+      prediction = c(rep(NA, length_input), preds),
+      n_pred = length_output
+    ) %>%
+    select(symbol, date, close, prediction, n_pred)
+  write.table(single_stock, "project/shiny_prediction_data.csv", row.names = FALSE,
+              col.names = !file.exists("project/shiny_prediction_data.csv"),
+              sep = ",", append = TRUE)
+}
+
+
+# ## 6. create example plots showing first 10 stock predictions
+# pdf(paste0("project/output/lstm_i", length_input, "_o", length_output, ".pdf"), onefile = TRUE, height = 7, width = 10)
+# for (i in 1:25) {
+#   single_stock = stock_test %>%
+#     filter(ticker == i) %>%
+#     mutate(
+#       index = 1:n(),
+#       prediction = c(rep(NA, length_input), unlist(xform_preds[i, 3:5]))
+#     )
+#   stock_plot = ggplot(single_stock) +
+#     geom_line(aes(index, close), color = "black") +
+#     geom_line(aes(index, prediction), color = "red", na.rm = TRUE) +
+#     ggtitle(single_stock$symbol[1])
+#   print(stock_plot)
+# }
+# dev.off()
+
+
+## create prediction and outcome
+shiny_prediction_data <- read_csv("project/shiny_prediction_data.csv")
+
+outcomes = shiny_prediction_data %>%
+  group_by(symbol, n_pred) %>%
+  mutate(
+    today = close[50],
+    # n_future = prediction[n()],
+    n_actual = close[n()],
+    # if stock goes up on average hold, else sell
+    decision = ifelse(mean(prediction, na.rm = TRUE) > today, "hold", "sell"),
+    # positive delta means you made money
+    delta = ifelse(decision == "hold", n_actual - today, today - n_actual)
+  )
+
+outcomes_summary = outcomes %>%
+  select(symbol, n_pred, decision, delta) %>%
+  unique()
+
+
+pdf("project/output/decisions.pdf", onefile = TRUE, width = 10, height = 7)
+for (i in 1:20) {
+  mydata = outcomes %>%
+    filter(symbol == shiny_stock[i]) %>%
+    filter(n_pred == 5)
+
+  myplot = ggplot(mydata) +
+    ggtitle(paste0(mydata$symbol[1],  " Model decision is ", mydata$decision[1],
+                   " and you make/lose ", round(mydata$delta[1], 2), " dollars")) +
+    geom_line(aes(date, close), color = "black") +
+    geom_line(aes(date, prediction), color = "red")
+  print(myplot)
 }
 dev.off()
